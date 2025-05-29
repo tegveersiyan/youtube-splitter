@@ -8,13 +8,13 @@ const fs = require('fs');
 const archiver = require('archiver');
 
 // Set FFmpeg paths
-const ffmpegPath = 'C:\\ffmpeg\\bin\\ffmpeg.exe';
-const ffprobePath = 'C:\\ffmpeg\\bin\\ffprobe.exe';
+const ffmpegPath = process.env.FFMPEG_PATH || 'C:\\ffmpeg\\bin\\ffmpeg.exe';
+const ffprobePath = process.env.FFPROBE_PATH || 'C:\\ffmpeg\\bin\\ffprobe.exe';
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
