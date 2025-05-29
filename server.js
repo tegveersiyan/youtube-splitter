@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const youtubeDl = require('youtube-dl-exec');
+const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -80,36 +80,18 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        const videoInfo = await youtubeDl(youtubeUrl, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCallHome: true,
-            noCheckCertificate: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath),
-            addHeader: [
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            ]
-        });
-
-        const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const videoInfo = await ytdl.getInfo(youtubeUrl);
+        const videoTitle = videoInfo.videoDetails.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
-        
-        await youtubeDl(youtubeUrl, {
-            output: videoPath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: 0,
-            noWarnings: true,
-            noCallHome: true,
-            noCheckCertificate: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath),
-            addHeader: [
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            ]
+
+        await new Promise((resolve, reject) => {
+            ytdl(youtubeUrl, {
+                quality: 'highestaudio',
+                filter: 'audioonly'
+            })
+            .pipe(fs.createWriteStream(videoPath))
+            .on('finish', resolve)
+            .on('error', reject);
         });
 
         const segments = [];
