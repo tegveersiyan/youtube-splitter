@@ -56,35 +56,23 @@ app.post('/split-video', async (req, res) => {
             return res.status(400).json({ error: 'Invalid input' });
         }
 
-        console.log('Processing URL:', youtubeUrl);
-        console.log('Raw Timestamps:', timestamps);
-
-        // Parse timestamps: support mm:ss or seconds
-        timestamps = timestamps.map(ts => {
+        const parsedTimestamps = timestamps.map(ts => {
             if (typeof ts === 'string' && ts.includes(':')) {
                 const parts = ts.split(':').map(Number);
-                if (parts.length === 2) {
-                    return parts[0] * 60 + parts[1];
-                } else if (parts.length === 3) {
-                    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-                }
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
             }
             return Number(ts);
         }).filter(ts => !isNaN(ts)).sort((a, b) => a - b);
 
-        if (timestamps.length === 0) {
+        if (parsedTimestamps.length === 0) {
             return res.status(400).json({ error: 'No valid timestamps provided' });
         }
 
-        // Add 0 at the start if not present
-        if (timestamps[0] !== 0) {
-            timestamps.unshift(0);
+        if (parsedTimestamps[0] !== 0) {
+            parsedTimestamps.unshift(0);
         }
 
-        console.log('Parsed Timestamps (in seconds):', timestamps);
-
-        // Get video info
-        console.log('Getting video info...');
         const videoInfo = await youtubeDl(youtubeUrl, {
             dumpSingleJson: true,
             noWarnings: true,
@@ -93,17 +81,11 @@ app.post('/split-video', async (req, res) => {
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
             ffmpegLocation: path.dirname(ffmpegPath)
-        }).catch(err => {
-            console.error('Error getting video info:', err);
-            throw new Error('Failed to get video information: ' + err.message);
         });
 
         const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        
-        // Download video
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
         
-        console.log('Downloading video...');
         await youtubeDl(youtubeUrl, {
             output: videoPath,
             extractAudio: true,
@@ -115,39 +97,24 @@ app.post('/split-video', async (req, res) => {
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
             ffmpegLocation: path.dirname(ffmpegPath)
-        }).catch(err => {
-            console.error('Error downloading video:', err);
-            throw new Error('Failed to download video: ' + err.message);
         });
 
-        console.log('Splitting audio into segments...');
-        // Split audio into segments
         const segments = [];
-        for (let i = 0; i < timestamps.length; i++) {
-            const startTime = timestamps[i];
-            const endTime = timestamps[i + 1];
+        for (let i = 0; i < parsedTimestamps.length; i++) {
+            const startTime = parsedTimestamps[i];
+            const endTime = parsedTimestamps[i + 1];
             const segmentPath = path.join(downloadsDir, `${videoTitle}_segment_${i + 1}.mp3`);
 
-            console.log(`Processing segment ${i + 1}: ${startTime} to ${endTime !== undefined ? endTime : 'end'}`);
             await new Promise((resolve, reject) => {
-                const command = ffmpeg(videoPath)
-                    .setStartTime(startTime);
+                const command = ffmpeg(videoPath).setStartTime(startTime);
                 if (endTime !== undefined) {
                     command.setDuration(endTime - startTime);
                 }
                 command
                     .toFormat('mp3')
-                    .on('end', () => {
-                        console.log(`Segment ${i + 1} completed`);
-                        resolve();
-                    })
-                    .on('error', (err) => {
-                        console.error(`Error processing segment ${i + 1}:`, err);
-                        reject(new Error(`Failed to process segment ${i + 1}: ${err.message}`));
-                    })
+                    .on('end', resolve)
+                    .on('error', reject)
                     .save(segmentPath);
-            }).catch(err => {
-                throw new Error(`Failed to process segment ${i + 1}: ${err.message}`);
             });
 
             segments.push({
@@ -156,18 +123,11 @@ app.post('/split-video', async (req, res) => {
             });
         }
 
-        // Clean up original files
-        console.log('Cleaning up temporary files...');
         fs.unlinkSync(videoPath);
-
-        console.log('Process completed successfully');
-        res.json({ 
-            success: true, 
-            segments: segments.map(s => s.name)
-        });
+        res.json({ success: true, segments: segments.map(s => s.name) });
 
     } catch (error) {
-        console.error('Detailed error:', error);
+        console.error('Error:', error);
         res.status(500).json({ error: 'Failed to process video: ' + error.message });
     }
 });
@@ -183,7 +143,6 @@ app.get('/download/:filename', (req, res) => {
                     console.error('Download error:', err);
                     res.status(500).json({ error: 'Error downloading file: ' + err.message });
                 }
-                // Delete file after download
                 fs.unlinkSync(filePath);
             });
         } else {
@@ -220,5 +179,5 @@ app.get('/download-zip', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
 }); 
