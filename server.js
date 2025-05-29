@@ -50,13 +50,13 @@ ffmpeg.getAvailableFormats(function(err, formats) {
 
 app.post('/split-video', async (req, res) => {
     try {
-        const { youtubeUrl, timestamps } = req.body;
+        const { youtubeUrl, timestamps: rawTimestamps } = req.body;
         
-        if (!youtubeUrl || !timestamps || !Array.isArray(timestamps)) {
+        if (!youtubeUrl || !rawTimestamps || !Array.isArray(rawTimestamps)) {
             return res.status(400).json({ error: 'Invalid input' });
         }
 
-        const parsedTimestamps = timestamps.map(ts => {
+        const parsedTimestamps = rawTimestamps.map(ts => {
             if (typeof ts === 'string' && ts.includes(':')) {
                 const parts = ts.split(':').map(Number);
                 if (parts.length === 2) return parts[0] * 60 + parts[1];
