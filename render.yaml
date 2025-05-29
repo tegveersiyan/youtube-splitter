@@ -6,4 +6,8 @@ services:
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
-        value: production 
+        value: production
+    disk:
+      name: downloads
+      mountPath: /opt/render/project/src/downloads
+      sizeGB: 1 

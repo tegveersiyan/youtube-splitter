@@ -8,8 +8,8 @@ const fs = require('fs');
 const archiver = require('archiver');
 
 // Set FFmpeg paths
-const ffmpegPath = process.env.FFMPEG_PATH || 'C:\\ffmpeg\\bin\\ffmpeg.exe';
-const ffprobePath = process.env.FFPROBE_PATH || 'C:\\ffmpeg\\bin\\ffprobe.exe';
+const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
+const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 
@@ -24,7 +24,7 @@ app.use(express.static('public'));
 // Create downloads directory if it doesn't exist
 const downloadsDir = path.join(__dirname, 'downloads');
 if (!fs.existsSync(downloadsDir)) {
-    fs.mkdirSync(downloadsDir);
+    fs.mkdirSync(downloadsDir, { recursive: true });
 }
 
 // Error handling middleware
