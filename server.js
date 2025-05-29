@@ -33,6 +33,12 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Server error: ' + err.message });
 });
 
+// Add this before other routes
+app.use((req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+});
+
 // Test FFmpeg installation
 ffmpeg.getAvailableFormats(function(err, formats) {
     if (err) {
