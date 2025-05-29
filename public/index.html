@@ -4,149 +4,234 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube Video Splitter</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
             padding: 20px;
+            background-color: #f5f5f5;
         }
         .container {
-            max-width: 800px;
             background-color: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .timestamp-input {
-            margin-bottom: 10px;
+        h1 {
+            color: #333;
+            text-align: center;
         }
-        .segment-list {
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .error {
+            color: #ff0000;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #ffe6e6;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            color: #4CAF50;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #e6ffe6;
+            border-radius: 4px;
+            display: none;
+        }
+        .segments {
             margin-top: 20px;
+        }
+        .segment-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .segment-item a {
+            margin-left: 10px;
+            color: #4CAF50;
+            text-decoration: none;
+        }
+        .segment-item a:hover {
+            text-decoration: underline;
         }
         .loading {
             display: none;
             text-align: center;
             margin: 20px 0;
         }
-        .spinner-border {
-            width: 3rem;
-            height: 3rem;
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">YouTube Video Splitter</h1>
-        
-        <form id="splitForm">
-            <div class="mb-3">
-                <label for="youtubeUrl" class="form-label">YouTube URL</label>
-                <input type="url" class="form-control" id="youtubeUrl" required
-                       placeholder="https://www.youtube.com/watch?v=...">
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label">Timestamps <span class="text-muted">(in seconds or mm:ss)</span></label>
-                <div id="timestampContainer">
-                    <div class="timestamp-input">
-                        <input type="text" class="form-control" placeholder="e.g. 90 or 1:30" required>
-                    </div>
-                </div>
-                <div class="form-text">Enter timestamps as seconds (e.g. 90) or as mm:ss (e.g. 1:30).<br>Segments will be: 0 to first timestamp, first to second, etc.</div>
-                <button type="button" class="btn btn-secondary mt-2" onclick="addTimestamp()">Add Timestamp</button>
-            </div>
-
-            <button type="submit" class="btn btn-primary w-100">Split Video</button>
-        </form>
-
-        <div class="loading">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="mt-2">Processing video... This may take a few minutes.</p>
+        <h1>YouTube Video Splitter</h1>
+        <div class="input-group">
+            <label for="youtubeUrl">YouTube URL:</label>
+            <input type="text" id="youtubeUrl" placeholder="Enter YouTube video URL">
         </div>
-
-        <div class="segment-list" id="segmentList"></div>
-        <div id="downloadAllContainer" style="display:none; margin-top:20px;">
-            <button class="btn btn-primary w-100" id="downloadAllBtn">Download All Segments (ZIP)</button>
+        <div class="input-group">
+            <label for="timestamps">Timestamps (one per line, format: mm:ss or seconds):</label>
+            <textarea id="timestamps" placeholder="Enter timestamps, one per line&#10;Example:&#10;1:30&#10;2:45&#10;180"></textarea>
         </div>
+        <button onclick="splitVideo()" id="splitButton">Split Video</button>
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+        <div id="loading" class="loading"></div>
+        <div id="segments" class="segments"></div>
     </div>
 
     <script>
-        function addTimestamp() {
-            const container = document.getElementById('timestampContainer');
-            const newInput = document.createElement('div');
-            newInput.className = 'timestamp-input';
-            newInput.innerHTML = `
-                <div class="input-group">
-                    <input type="text" class="form-control" placeholder="e.g. 90 or 1:30" required>
-                    <button type="button" class="btn btn-danger" onclick="this.parentElement.parentElement.remove()">Remove</button>
-                </div>
-            `;
-            container.appendChild(newInput);
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            document.getElementById('success').style.display = 'none';
         }
 
-        document.getElementById('splitForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const youtubeUrl = document.getElementById('youtubeUrl').value;
-            const timestamps = Array.from(document.querySelectorAll('#timestampContainer input'))
-                .map(input => input.value.trim())
-                .filter(val => val.length > 0);
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+        }
 
-            if (timestamps.length === 0) {
-                alert('Please add at least one timestamp');
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('splitButton').disabled = show;
+        }
+
+        function clearSegments() {
+            document.getElementById('segments').innerHTML = '';
+        }
+
+        async function splitVideo() {
+            const youtubeUrl = document.getElementById('youtubeUrl').value.trim();
+            const timestampsText = document.getElementById('timestamps').value.trim();
+            
+            if (!youtubeUrl) {
+                showError('Please enter a YouTube URL');
+                return;
+            }
+            
+            if (!timestampsText) {
+                showError('Please enter at least one timestamp');
                 return;
             }
 
-            // Show loading spinner
-            document.querySelector('.loading').style.display = 'block';
-            document.getElementById('segmentList').innerHTML = '';
+            const timestamps = timestampsText.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+
+            if (timestamps.length === 0) {
+                showError('Please enter at least one timestamp');
+                return;
+            }
+
+            showLoading(true);
+            clearSegments();
+            showError('');
+            showSuccess('');
 
             try {
                 const response = await fetch('/split-video', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ youtubeUrl, timestamps }),
+                    body: JSON.stringify({ youtubeUrl, timestamps })
                 });
 
                 const data = await response.json();
 
-                if (data.error) {
-                    throw new Error(data.error);
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to process video');
                 }
 
-                // Display download links
-                const segmentList = document.getElementById('segmentList');
-                segmentList.innerHTML = '<h3 class="mt-4">Download Segments:</h3>';
-                
-                data.segments.forEach((segment, index) => {
-                    const link = document.createElement('a');
-                    link.href = `/download/${segment}`;
-                    link.className = 'btn btn-success d-block mb-2';
-                    link.textContent = `Download Segment ${index + 1}`;
-                    segmentList.appendChild(link);
-                });
+                if (data.segments && data.segments.length > 0) {
+                    const segmentsDiv = document.getElementById('segments');
+                    data.segments.forEach(segment => {
+                        const segmentDiv = document.createElement('div');
+                        segmentDiv.className = 'segment-item';
+                        segmentDiv.innerHTML = `
+                            <span>${segment}</span>
+                            <a href="/download/${segment}" download>Download</a>
+                        `;
+                        segmentsDiv.appendChild(segmentDiv);
+                    });
 
-                // Show Download All button
-                const downloadAllContainer = document.getElementById('downloadAllContainer');
-                downloadAllContainer.style.display = 'block';
-                const downloadAllBtn = document.getElementById('downloadAllBtn');
-                downloadAllBtn.onclick = function() {
-                    const files = data.segments.join(',');
-                    window.location.href = `/download-zip?files=${encodeURIComponent(files)}`;
-                };
+                    // Add download all button
+                    const downloadAllDiv = document.createElement('div');
+                    downloadAllDiv.className = 'segment-item';
+                    const downloadAllButton = document.createElement('button');
+                    downloadAllButton.textContent = 'Download All';
+                    downloadAllButton.onclick = () => {
+                        const files = data.segments.join(',');
+                        window.location.href = `/download-zip?files=${encodeURIComponent(files)}`;
+                    };
+                    downloadAllDiv.appendChild(downloadAllButton);
+                    segmentsDiv.appendChild(downloadAllDiv);
 
+                    showSuccess('Video split successfully!');
+                } else {
+                    showError('No segments were created');
+                }
             } catch (error) {
-                alert('Error: ' + error.message);
+                showError(error.message || 'An error occurred while processing the video');
             } finally {
-                document.querySelector('.loading').style.display = 'none';
-                // Hide Download All button on new request
-                document.getElementById('downloadAllContainer').style.display = 'none';
+                showLoading(false);
             }
-        });
+        }
     </script>
 </body>
 </html> 

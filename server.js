@@ -27,6 +27,12 @@ if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir);
 }
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server Error:', err);
+    res.status(500).json({ error: 'Server error: ' + err.message });
+});
+
 // Test FFmpeg installation
 ffmpeg.getAvailableFormats(function(err, formats) {
     if (err) {
@@ -38,7 +44,7 @@ ffmpeg.getAvailableFormats(function(err, formats) {
 
 app.post('/split-video', async (req, res) => {
     try {
-        let { youtubeUrl, timestamps } = req.body;
+        const { youtubeUrl, timestamps } = req.body;
         
         if (!youtubeUrl || !timestamps || !Array.isArray(timestamps)) {
             return res.status(400).json({ error: 'Invalid input' });
@@ -50,7 +56,6 @@ app.post('/split-video', async (req, res) => {
         // Parse timestamps: support mm:ss or seconds
         timestamps = timestamps.map(ts => {
             if (typeof ts === 'string' && ts.includes(':')) {
-                // mm:ss or hh:mm:ss
                 const parts = ts.split(':').map(Number);
                 if (parts.length === 2) {
                     return parts[0] * 60 + parts[1];
@@ -60,6 +65,10 @@ app.post('/split-video', async (req, res) => {
             }
             return Number(ts);
         }).filter(ts => !isNaN(ts)).sort((a, b) => a - b);
+
+        if (timestamps.length === 0) {
+            return res.status(400).json({ error: 'No valid timestamps provided' });
+        }
 
         // Add 0 at the start if not present
         if (timestamps[0] !== 0) {
@@ -78,6 +87,9 @@ app.post('/split-video', async (req, res) => {
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
             ffmpegLocation: path.dirname(ffmpegPath)
+        }).catch(err => {
+            console.error('Error getting video info:', err);
+            throw new Error('Failed to get video information: ' + err.message);
         });
 
         const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -97,6 +109,9 @@ app.post('/split-video', async (req, res) => {
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
             ffmpegLocation: path.dirname(ffmpegPath)
+        }).catch(err => {
+            console.error('Error downloading video:', err);
+            throw new Error('Failed to download video: ' + err.message);
         });
 
         console.log('Splitting audio into segments...');
@@ -122,9 +137,11 @@ app.post('/split-video', async (req, res) => {
                     })
                     .on('error', (err) => {
                         console.error(`Error processing segment ${i + 1}:`, err);
-                        reject(err);
+                        reject(new Error(`Failed to process segment ${i + 1}: ${err.message}`));
                     })
                     .save(segmentPath);
+            }).catch(err => {
+                throw new Error(`Failed to process segment ${i + 1}: ${err.message}`);
             });
 
             segments.push({
@@ -150,40 +167,50 @@ app.post('/split-video', async (req, res) => {
 });
 
 app.get('/download/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filePath = path.join(downloadsDir, filename);
-    
-    if (fs.existsSync(filePath)) {
-        res.download(filePath, filename, (err) => {
-            if (err) {
-                console.error('Download error:', err);
-                res.status(500).send('Error downloading file');
-            }
-            // Delete file after download
-            fs.unlinkSync(filePath);
-        });
-    } else {
-        res.status(404).send('File not found');
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(downloadsDir, filename);
+        
+        if (fs.existsSync(filePath)) {
+            res.download(filePath, filename, (err) => {
+                if (err) {
+                    console.error('Download error:', err);
+                    res.status(500).json({ error: 'Error downloading file: ' + err.message });
+                }
+                // Delete file after download
+                fs.unlinkSync(filePath);
+            });
+        } else {
+            res.status(404).json({ error: 'File not found' });
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        res.status(500).json({ error: 'Error downloading file: ' + error.message });
     }
 });
 
 app.get('/download-zip', async (req, res) => {
-    const files = req.query.files;
-    if (!files) {
-        return res.status(400).send('No files specified');
-    }
-    const fileList = files.split(',').map(f => f.trim());
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="segments.zip"');
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.pipe(res);
-    for (const file of fileList) {
-        const filePath = path.join(downloadsDir, file);
-        if (fs.existsSync(filePath)) {
-            archive.file(filePath, { name: file });
+    try {
+        const files = req.query.files;
+        if (!files) {
+            return res.status(400).json({ error: 'No files specified' });
         }
+        const fileList = files.split(',').map(f => f.trim());
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename="segments.zip"');
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.pipe(res);
+        for (const file of fileList) {
+            const filePath = path.join(downloadsDir, file);
+            if (fs.existsSync(filePath)) {
+                archive.file(filePath, { name: file });
+            }
+        }
+        archive.finalize();
+    } catch (error) {
+        console.error('Zip error:', error);
+        res.status(500).json({ error: 'Error creating zip file: ' + error.message });
     }
-    archive.finalize();
 });
 
 app.listen(port, () => {
