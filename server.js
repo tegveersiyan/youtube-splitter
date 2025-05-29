@@ -10,8 +10,15 @@ const archiver = require('archiver');
 // Set FFmpeg paths
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
 const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
+const cookiesPath = path.join(__dirname, 'youtube.com_cookies.txt');
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
+
+// Check if cookies file exists
+if (!fs.existsSync(cookiesPath)) {
+    console.warn('Warning: YouTube cookies file not found. Some videos may require authentication.');
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -80,7 +87,10 @@ app.post('/split-video', async (req, res) => {
             noCheckCertificate: true,
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath)
+            ffmpegLocation: path.dirname(ffmpegPath),
+            addHeader: [
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ]
         });
 
         const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -96,7 +106,10 @@ app.post('/split-video', async (req, res) => {
             noCheckCertificate: true,
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath)
+            ffmpegLocation: path.dirname(ffmpegPath),
+            addHeader: [
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ]
         });
 
         const segments = [];
