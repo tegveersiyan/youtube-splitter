@@ -1,58 +1,18 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const YTDlpWrap = require('yt-dlp-wrap').default;
+const youtubeDl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
-const { execSync } = require('child_process');
 
 // Set FFmpeg paths for Render
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
 const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
-const cookiesPath = path.join(__dirname, 'youtube.com_cookies.txt');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
-
-// Check if cookies file exists
-if (!fs.existsSync(cookiesPath)) {
-    console.warn('Warning: YouTube cookies file not found. Some videos may require authentication.');
-}
-
-// Function to install yt-dlp
-async function ensureYtDlp() {
-    try {
-        const ytDlp = new YTDlpWrap();
-        await ytDlp.getVersion();
-        console.log('yt-dlp is installed');
-    } catch (error) {
-        console.log('Installing yt-dlp...');
-        try {
-            // Install yt-dlp in the project directory without sudo
-            const ytDlpPath = path.join(__dirname, 'yt-dlp');
-            execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpPath}" && chmod a+rx "${ytDlpPath}"`, { stdio: 'inherit' });
-            // Set the path to include the current directory
-            process.env.PATH = `${__dirname}:${process.env.PATH}`;
-            console.log('yt-dlp installed successfully');
-        } catch (installError) {
-            console.error('Failed to install yt-dlp:', installError);
-            throw new Error('Failed to install yt-dlp. Please check the Render logs for more details.');
-        }
-    }
-}
-
-// Initialize yt-dlp
-let ytDlp;
-(async () => {
-    try {
-        await ensureYtDlp();
-        ytDlp = new YTDlpWrap();
-    } catch (error) {
-        console.error('Failed to initialize yt-dlp:', error);
-    }
-})();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -91,11 +51,6 @@ ffmpeg.getAvailableFormats(function(err, formats) {
 
 app.post('/split-video', async (req, res) => {
     try {
-        if (!ytDlp) {
-            await ensureYtDlp();
-            ytDlp = new YTDlpWrap();
-        }
-
         const { youtubeUrl, timestamps: rawTimestamps } = req.body;
         
         if (!youtubeUrl || !rawTimestamps || !Array.isArray(rawTimestamps)) {
@@ -119,23 +74,31 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        const videoInfo = await ytDlp.getVideoInfo(youtubeUrl);
+        // Get video info
+        const videoInfo = await youtubeDl(youtubeUrl, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            format: 'bestaudio/best'
+        });
+
         const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
         
-        await ytDlp.exec([
-            youtubeUrl,
-            '-x',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '-o', videoPath,
-            '--no-warnings',
-            '--no-call-home',
-            '--no-check-certificate',
-            '--prefer-free-formats',
-            '--youtube-skip-dash-manifest',
-            '--format', 'bestaudio/best'
-        ]);
+        // Download video
+        await youtubeDl(youtubeUrl, {
+            output: videoPath,
+            extractAudio: true,
+            audioFormat: 'mp3',
+            audioQuality: 0,
+            noWarnings: true,
+            noCallHome: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            format: 'bestaudio/best'
+        });
 
         const segments = [];
         for (let i = 0; i < parsedTimestamps.length; i++) {
@@ -170,7 +133,7 @@ app.post('/split-video', async (req, res) => {
             return res.status(400).json({ error: 'This video is no longer available on YouTube' });
         }
         if (error.message.includes('Status code: 403')) {
-            return res.status(400).json({ error: 'This video is not available for download' });
+            return res.status(400).json({ error: 'This video is not available for download. Please try a different video.' });
         }
         res.status(500).json({ error: 'Failed to process video: ' + error.message });
     }
