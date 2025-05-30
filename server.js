@@ -1,11 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const youtubeDl = require('youtube-dl-exec');
+const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
+const { google } = require('googleapis');
 
 // Set FFmpeg paths for Render
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
@@ -13,6 +14,14 @@ const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
+
+// YouTube API setup
+const youtube = google.youtube('v3');
+const API_KEY = process.env.YOUTUBE_API_KEY;
+
+if (!API_KEY) {
+    console.warn('Warning: YouTube API key not set. Some videos may not be accessible.');
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -57,6 +66,22 @@ app.post('/split-video', async (req, res) => {
             return res.status(400).json({ error: 'Invalid input' });
         }
 
+        const videoId = ytdl.getVideoID(youtubeUrl);
+        
+        // Get video info using YouTube API
+        const videoInfo = await youtube.videos.list({
+            key: API_KEY,
+            part: 'snippet',
+            id: videoId
+        });
+
+        if (!videoInfo.data.items || videoInfo.data.items.length === 0) {
+            return res.status(400).json({ error: 'Video not found' });
+        }
+
+        const videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
+
         const parsedTimestamps = rawTimestamps.map(ts => {
             if (typeof ts === 'string' && ts.includes(':')) {
                 const parts = ts.split(':').map(Number);
@@ -74,30 +99,15 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        // Get video info
-        const videoInfo = await youtubeDl(youtubeUrl, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCallHome: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            format: 'bestaudio/best'
-        });
-
-        const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
-        
-        // Download video
-        await youtubeDl(youtubeUrl, {
-            output: videoPath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: 0,
-            noWarnings: true,
-            noCallHome: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            format: 'bestaudio/best'
+        // Download video using ytdl-core
+        await new Promise((resolve, reject) => {
+            ytdl(youtubeUrl, {
+                quality: 'highestaudio',
+                filter: 'audioonly'
+            })
+            .pipe(fs.createWriteStream(videoPath))
+            .on('finish', resolve)
+            .on('error', reject);
         });
 
         const segments = [];

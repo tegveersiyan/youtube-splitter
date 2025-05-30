@@ -17,6 +17,8 @@ services:
         value: /usr/bin/ffmpeg
       - key: FFPROBE_PATH
         value: /usr/bin/ffprobe
+      - key: YOUTUBE_API_KEY
+        sync: false
     disk:
       name: downloads
       mountPath: /opt/render/project/src/downloads
