@@ -234,6 +234,13 @@
                 }
 
                 if (data.error) {
+                    if (data.error.includes('410')) {
+                        throw new Error('This video is no longer available on YouTube. Please check if the video has been removed or is private.');
+                    } else if (data.error.includes('403')) {
+                        throw new Error('Access to this video is restricted. The video might be private or age-restricted.');
+                    } else if (data.error.includes('404')) {
+                        throw new Error('Video not found. Please check if the URL is correct.');
+                    }
                     throw new Error(data.message || 'Server error');
                 }
 

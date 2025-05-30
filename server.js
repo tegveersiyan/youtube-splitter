@@ -161,19 +161,47 @@ app.post('/split-video', async (req, res) => {
         // Download video using ytdl-core
         try {
             console.log('Starting video download...');
+            console.log('Video URL:', youtubeUrl);
+            
+            // First, get video info to verify it's accessible
+            const videoInfo = await ytdl.getInfo(youtubeUrl);
+            console.log('Video info retrieved successfully');
+            console.log('Video title:', videoInfo.videoDetails.title);
+            console.log('Video length:', videoInfo.videoDetails.lengthSeconds, 'seconds');
+            
             await new Promise((resolve, reject) => {
                 const stream = ytdl(youtubeUrl, {
                     quality: 'highestaudio',
-                    filter: 'audioonly'
+                    filter: 'audioonly',
+                    requestOptions: {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                    }
                 });
 
                 stream.on('error', (error) => {
                     console.error('Video download error:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        code: error.code,
+                        statusCode: error.statusCode,
+                        stack: error.stack
+                    });
                     reject(error);
                 });
 
                 stream.on('progress', (chunkLength, downloaded, total) => {
                     console.log(`Download progress: ${(downloaded / total * 100).toFixed(2)}%`);
+                });
+
+                stream.on('info', (info, format) => {
+                    console.log('Stream info:', {
+                        title: info.videoDetails.title,
+                        author: info.videoDetails.author.name,
+                        length: info.videoDetails.lengthSeconds,
+                        format: format.qualityLabel
+                    });
                 });
 
                 stream.pipe(fs.createWriteStream(videoPath))
@@ -188,9 +216,32 @@ app.post('/split-video', async (req, res) => {
             });
         } catch (error) {
             console.error('Download Error:', error);
+            console.error('Error details:', {
+                message: error.message,
+                code: error.code,
+                statusCode: error.statusCode,
+                stack: error.stack
+            });
+            
+            // Clean up any partial download
+            if (fs.existsSync(videoPath)) {
+                fs.unlinkSync(videoPath);
+            }
+            
+            let errorMessage = 'Failed to download video: ';
+            if (error.statusCode === 410) {
+                errorMessage += 'Video is no longer available or has been removed.';
+            } else if (error.statusCode === 403) {
+                errorMessage += 'Access to this video is restricted.';
+            } else if (error.statusCode === 404) {
+                errorMessage += 'Video not found.';
+            } else {
+                errorMessage += error.message;
+            }
+            
             return res.status(500).json({ 
                 error: true,
-                message: 'Failed to download video: ' + error.message 
+                message: errorMessage
             });
         }
 
