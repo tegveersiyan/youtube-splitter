@@ -7,8 +7,6 @@ services:
     buildCommand: |
       apt-get update && apt-get install -y ffmpeg
       npm install
-      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp
-      chmod a+rx yt-dlp
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -18,7 +16,7 @@ services:
       - key: FFPROBE_PATH
         value: /usr/bin/ffprobe
       - key: YOUTUBE_API_KEY
-        sync: false
+        value: AIzaSyC-Rp3vfU_eTX27RaEtMeZs5YFFzrJdZ-Y
     disk:
       name: downloads
       mountPath: /opt/render/project/src/downloads
