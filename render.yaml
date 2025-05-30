@@ -16,7 +16,7 @@ services:
       - key: FFPROBE_PATH
         value: /usr/bin/ffprobe
       - key: YOUTUBE_API_KEY
-        value: AIzaSyC-Rp3vfU_eTX27RaEtMeZs5YFFzrJdZ-Y
+        sync: false
     disk:
       name: downloads
       mountPath: /opt/render/project/src/downloads

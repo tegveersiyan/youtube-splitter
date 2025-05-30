@@ -55,9 +55,8 @@ app.use((err, req, res, next) => {
 
 // Ensure JSON responses for API endpoints
 app.use((req, res, next) => {
-    if (req.path.startsWith('/api/')) {
-        res.setHeader('Content-Type', 'application/json');
-    }
+    // Set JSON content type for all API responses
+    res.setHeader('Content-Type', 'application/json');
     next();
 });
 
