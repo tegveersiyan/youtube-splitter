@@ -5,7 +5,7 @@ services:
     plan: standard
     region: oregon
     buildCommand: |
-      apt-get update && apt-get install -y ffmpeg
+      apt-get update && apt-get install -y ffmpeg youtube-dl
       npm install
     startCommand: node server.js
     envVars:

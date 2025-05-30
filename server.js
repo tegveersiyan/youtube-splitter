@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const ytdl = require('ytdl-core');
+const youtubeDl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -87,23 +87,11 @@ app.post('/split-video', async (req, res) => {
             });
         }
 
-        let videoId;
-        try {
-            videoId = ytdl.getVideoID(youtubeUrl);
-            console.log('Extracted video ID:', videoId);
-        } catch (error) {
-            console.error('Error extracting video ID:', error);
-            return res.status(400).json({ 
-                error: true,
-                message: 'Invalid YouTube URL: ' + error.message 
-            });
-        }
-
         // Get video info using YouTube API
         let videoInfo;
         try {
             console.log('Fetching video info from YouTube API...');
-            console.log('Using API key:', API_KEY ? 'API key is set' : 'API key is missing');
+            const videoId = youtubeUrl.split('v=')[1];
             videoInfo = await youtube.videos.list({
                 key: API_KEY,
                 part: 'snippet',
@@ -115,7 +103,6 @@ app.post('/split-video', async (req, res) => {
             }
         } catch (error) {
             console.error('YouTube API Error:', error);
-            console.error('Error details:', error.response ? error.response.data : 'No response data');
             return res.status(500).json({ 
                 error: true,
                 message: 'Failed to fetch video information from YouTube: ' + error.message 
@@ -158,76 +145,29 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        // Download video using ytdl-core
+        // Download video using youtube-dl
         try {
             console.log('Starting video download...');
             console.log('Video URL:', youtubeUrl);
             
-            // First, get video info to verify it's accessible
-            const videoInfo = await ytdl.getInfo(youtubeUrl);
-            console.log('Video info retrieved successfully');
-            console.log('Video title:', videoInfo.videoDetails.title);
-            console.log('Video length:', videoInfo.videoDetails.lengthSeconds, 'seconds');
-            
-            await new Promise((resolve, reject) => {
-                const stream = ytdl(youtubeUrl, {
-                    quality: 'highestaudio',
-                    filter: 'audioonly',
-                    requestOptions: {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                            'Accept-Language': 'en-US,en;q=0.5',
-                            'Connection': 'keep-alive',
-                            'Upgrade-Insecure-Requests': '1'
-                        }
-                    },
-                    lang: 'en',
-                    range: { start: 0, end: 0 }
-                });
+            const options = {
+                extractAudio: true,
+                audioFormat: 'mp3',
+                audioQuality: 0,
+                output: videoPath,
+                noCheckCertificates: true,
+                noWarnings: true,
+                preferFreeFormats: true,
+                addHeader: [
+                    'referer:youtube.com',
+                    'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                ]
+            };
 
-                stream.on('error', (error) => {
-                    console.error('Video download error:', error);
-                    console.error('Error details:', {
-                        message: error.message,
-                        code: error.code,
-                        statusCode: error.statusCode,
-                        stack: error.stack
-                    });
-                    reject(error);
-                });
+            console.log('Downloading with options:', options);
+            await youtubeDl(youtubeUrl, options);
+            console.log('Video download completed');
 
-                stream.on('progress', (chunkLength, downloaded, total) => {
-                    console.log(`Download progress: ${(downloaded / total * 100).toFixed(2)}%`);
-                });
-
-                stream.on('info', (info, format) => {
-                    console.log('Stream info:', {
-                        title: info.videoDetails.title,
-                        author: info.videoDetails.author.name,
-                        length: info.videoDetails.lengthSeconds,
-                        format: format.qualityLabel,
-                        formats: info.formats.map(f => ({
-                            quality: f.qualityLabel,
-                            mimeType: f.mimeType,
-                            hasAudio: f.hasAudio,
-                            hasVideo: f.hasVideo
-                        }))
-                    });
-                });
-
-                const writeStream = fs.createWriteStream(videoPath);
-                writeStream.on('error', (error) => {
-                    console.error('File write error:', error);
-                    reject(error);
-                });
-
-                stream.pipe(writeStream)
-                    .on('finish', () => {
-                        console.log('Video download completed');
-                        resolve();
-                    });
-            });
         } catch (error) {
             console.error('Download Error:', error);
             console.error('Error details:', {
@@ -242,21 +182,9 @@ app.post('/split-video', async (req, res) => {
                 fs.unlinkSync(videoPath);
             }
             
-            let errorMessage = 'Failed to download video: ';
-            if (error.statusCode === 410) {
-                errorMessage += 'Video is no longer available or has been removed.';
-            } else if (error.statusCode === 403) {
-                errorMessage += 'Access to this video is restricted.';
-            } else if (error.statusCode === 404) {
-                errorMessage += 'Video not found.';
-            } else {
-                errorMessage += error.message;
-            }
-            
             return res.status(500).json({ 
                 error: true,
-                message: errorMessage,
-                statusCode: error.statusCode || 500
+                message: 'Failed to download video: ' + error.message
             });
         }
 
