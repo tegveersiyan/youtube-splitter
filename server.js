@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const youtubeDl = require('youtube-dl-exec');
+const YTDlpWrap = require('yt-dlp-wrap').default;
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -55,6 +55,8 @@ ffmpeg.getAvailableFormats(function(err, formats) {
     }
 });
 
+const ytDlp = new YTDlpWrap();
+
 app.post('/split-video', async (req, res) => {
     try {
         const { youtubeUrl, timestamps: rawTimestamps } = req.body;
@@ -80,36 +82,23 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        const videoInfo = await youtubeDl(youtubeUrl, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCallHome: true,
-            noCheckCertificate: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath),
-            format: 'bestaudio/best',
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: 0
-        });
-
+        const videoInfo = await ytDlp.getVideoInfo(youtubeUrl);
         const videoTitle = videoInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
         
-        await youtubeDl(youtubeUrl, {
-            output: videoPath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: 0,
-            noWarnings: true,
-            noCallHome: true,
-            noCheckCertificate: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            ffmpegLocation: path.dirname(ffmpegPath),
-            format: 'bestaudio/best'
-        });
+        await ytDlp.exec([
+            youtubeUrl,
+            '-x',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '-o', videoPath,
+            '--no-warnings',
+            '--no-call-home',
+            '--no-check-certificate',
+            '--prefer-free-formats',
+            '--youtube-skip-dash-manifest',
+            '--format', 'bestaudio/best'
+        ]);
 
         const segments = [];
         for (let i = 0; i < parsedTimestamps.length; i++) {
