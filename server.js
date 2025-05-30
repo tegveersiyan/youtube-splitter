@@ -8,7 +8,7 @@ const fs = require('fs');
 const archiver = require('archiver');
 const { execSync } = require('child_process');
 
-// Set FFmpeg paths
+// Set FFmpeg paths for Render
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
 const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
 const cookiesPath = path.join(__dirname, 'youtube.com_cookies.txt');
@@ -30,17 +30,12 @@ async function ensureYtDlp() {
     } catch (error) {
         console.log('Installing yt-dlp...');
         try {
-            if (process.platform === 'win32') {
-                // For Windows
-                execSync('npm install -g yt-dlp-wrap', { stdio: 'inherit' });
-            } else {
-                // For Linux/Mac
-                execSync('sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp', { stdio: 'inherit' });
-            }
+            // For Render (Linux environment)
+            execSync('curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /tmp/yt-dlp && chmod a+rx /tmp/yt-dlp && sudo mv /tmp/yt-dlp /usr/local/bin/yt-dlp', { stdio: 'inherit' });
             console.log('yt-dlp installed successfully');
         } catch (installError) {
             console.error('Failed to install yt-dlp:', installError);
-            throw new Error('Failed to install yt-dlp. Please install it manually: https://github.com/yt-dlp/yt-dlp#installation');
+            throw new Error('Failed to install yt-dlp. Please ensure the application has sudo privileges on Render.');
         }
     }
 }

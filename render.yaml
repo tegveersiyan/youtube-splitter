@@ -2,11 +2,17 @@ services:
   - type: web
     name: youtube-splitter
     env: node
-    buildCommand: npm install
+    buildCommand: |
+      apt-get update && apt-get install -y ffmpeg
+      npm install
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: FFMPEG_PATH
+        value: /usr/bin/ffmpeg
+      - key: FFPROBE_PATH
+        value: /usr/bin/ffprobe
     disk:
       name: downloads
       mountPath: /opt/render/project/src/downloads
