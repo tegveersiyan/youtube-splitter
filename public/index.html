@@ -120,7 +120,9 @@
             const errorDiv = document.getElementById('errorMessage');
             errorDiv.textContent = message;
             errorDiv.style.display = 'block';
-            document.getElementById('successMessage').style.display = 'none';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
         }
 
         function showSuccess(message) {
@@ -194,62 +196,85 @@
             }
         }
 
-        document.getElementById('splitForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
+        async function splitVideo() {
             const youtubeUrl = document.getElementById('youtubeUrl').value;
-            const timestamps = Array.from(document.getElementsByClassName('timestamp'))
-                .map(input => input.value)
-                .filter(value => value.trim() !== '');
-
-            if (timestamps.length === 0) {
-                showError('Please add at least one timestamp');
+            const timestampsInput = document.getElementById('timestamps').value;
+            const timestamps = timestampsInput.split('\n').map(t => t.trim()).filter(t => t);
+            
+            if (!youtubeUrl || timestamps.length === 0) {
+                showError('Please enter a YouTube URL and at least one timestamp');
                 return;
             }
 
-            showLoading(true);
-            showError('');
-            showSuccess('');
-            document.getElementById('segmentList').style.display = 'none';
-
             try {
+                showLoading(true);
+                console.log('Sending request to server:', { youtubeUrl, timestamps });
+                
                 const response = await fetch('/split-video', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        youtubeUrl,
-                        timestamps
-                    })
+                    body: JSON.stringify({ youtubeUrl, timestamps })
                 });
 
-                // Check if the response is JSON
+                console.log('Response status:', response.status);
                 const contentType = response.headers.get('content-type');
+                console.log('Response content type:', contentType);
+
+                let data;
                 if (contentType && contentType.includes('application/json')) {
-                    const data = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(data.message || 'Failed to process video');
-                    }
-
-                    if (data.error) {
-                        throw new Error(data.message || 'An error occurred');
-                    }
-
-                    showSuccess('Video processed successfully!');
-                    displaySegments(data.segments);
+                    data = await response.json();
+                    console.log('Response data:', data);
                 } else {
-                    // Handle non-JSON response
                     const text = await response.text();
-                    throw new Error(text || 'An unexpected error occurred');
+                    console.error('Non-JSON response:', text);
+                    throw new Error('Server returned invalid response format');
+                }
+
+                if (data.error) {
+                    throw new Error(data.message || 'Server error');
+                }
+
+                if (data.segments && data.segments.length > 0) {
+                    const segmentsList = document.getElementById('segmentsList');
+                    segmentsList.innerHTML = '';
+                    
+                    data.segments.forEach((segment, index) => {
+                        const li = document.createElement('li');
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = `/download/${encodeURIComponent(segment)}`;
+                        downloadLink.textContent = `Download Segment ${index + 1}`;
+                        downloadLink.className = 'download-link';
+                        li.appendChild(downloadLink);
+                        segmentsList.appendChild(li);
+                    });
+
+                    if (data.segments.length > 1) {
+                        const downloadAllLink = document.createElement('a');
+                        downloadAllLink.href = '/download-all';
+                        downloadAllLink.textContent = 'Download All Segments';
+                        downloadAllLink.className = 'download-all-link';
+                        segmentsList.appendChild(document.createElement('br'));
+                        segmentsList.appendChild(downloadAllLink);
+                    }
+
+                    document.getElementById('segments').style.display = 'block';
+                } else {
+                    throw new Error('No segments were created');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                showError(error.message || 'An error occurred while processing the video');
+                showError(error.message || 'An unexpected error occurred');
             } finally {
                 showLoading(false);
             }
+        }
+
+        document.getElementById('splitForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            await splitVideo();
         });
     </script>
 </body>

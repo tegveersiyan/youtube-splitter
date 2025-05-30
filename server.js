@@ -41,12 +41,14 @@ if (!fs.existsSync(downloadsDir)) {
 // Debug middleware to log all requests
 app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    console.log('Request body:', req.body);
     next();
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Server Error:', err);
+    console.error('Error stack:', err.stack);
     res.status(500).json({ 
         error: true,
         message: 'Server error: ' + err.message 
@@ -93,7 +95,7 @@ app.post('/split-video', async (req, res) => {
             console.error('Error extracting video ID:', error);
             return res.status(400).json({ 
                 error: true,
-                message: 'Invalid YouTube URL' 
+                message: 'Invalid YouTube URL: ' + error.message 
             });
         }
 
@@ -101,17 +103,22 @@ app.post('/split-video', async (req, res) => {
         let videoInfo;
         try {
             console.log('Fetching video info from YouTube API...');
+            console.log('Using API key:', API_KEY ? 'API key is set' : 'API key is missing');
             videoInfo = await youtube.videos.list({
                 key: API_KEY,
                 part: 'snippet',
                 id: videoId
             });
             console.log('Video info received:', videoInfo.data.items ? 'Video found' : 'Video not found');
+            if (videoInfo.data.items) {
+                console.log('Video title:', videoInfo.data.items[0].snippet.title);
+            }
         } catch (error) {
             console.error('YouTube API Error:', error);
+            console.error('Error details:', error.response ? error.response.data : 'No response data');
             return res.status(500).json({ 
                 error: true,
-                message: 'Failed to fetch video information from YouTube' 
+                message: 'Failed to fetch video information from YouTube: ' + error.message 
             });
         }
 
@@ -119,13 +126,14 @@ app.post('/split-video', async (req, res) => {
             console.log('Video not found in YouTube API response');
             return res.status(404).json({ 
                 error: true,
-                message: 'Video not found' 
+                message: 'Video not found or is not accessible' 
             });
         }
 
         const videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
         console.log('Processing video:', videoTitle);
+        console.log('Video path:', videoPath);
 
         const parsedTimestamps = rawTimestamps.map(ts => {
             if (typeof ts === 'string' && ts.includes(':')) {
@@ -154,19 +162,29 @@ app.post('/split-video', async (req, res) => {
         try {
             console.log('Starting video download...');
             await new Promise((resolve, reject) => {
-                ytdl(youtubeUrl, {
+                const stream = ytdl(youtubeUrl, {
                     quality: 'highestaudio',
                     filter: 'audioonly'
-                })
-                .pipe(fs.createWriteStream(videoPath))
-                .on('finish', () => {
-                    console.log('Video download completed');
-                    resolve();
-                })
-                .on('error', (error) => {
+                });
+
+                stream.on('error', (error) => {
                     console.error('Video download error:', error);
                     reject(error);
                 });
+
+                stream.on('progress', (chunkLength, downloaded, total) => {
+                    console.log(`Download progress: ${(downloaded / total * 100).toFixed(2)}%`);
+                });
+
+                stream.pipe(fs.createWriteStream(videoPath))
+                    .on('finish', () => {
+                        console.log('Video download completed');
+                        resolve();
+                    })
+                    .on('error', (error) => {
+                        console.error('File write error:', error);
+                        reject(error);
+                    });
             });
         } catch (error) {
             console.error('Download Error:', error);
@@ -185,10 +203,19 @@ app.post('/split-video', async (req, res) => {
 
             try {
                 await new Promise((resolve, reject) => {
-                    const command = ffmpeg(videoPath).setStartTime(startTime);
+                    const command = ffmpeg(videoPath)
+                        .setStartTime(startTime)
+                        .on('start', (commandLine) => {
+                            console.log('FFmpeg command:', commandLine);
+                        })
+                        .on('progress', (progress) => {
+                            console.log(`Segment ${i + 1} progress:`, progress);
+                        });
+
                     if (endTime !== undefined) {
                         command.setDuration(endTime - startTime);
                     }
+
                     command
                         .toFormat('mp3')
                         .on('end', () => {
@@ -240,6 +267,7 @@ app.post('/split-video', async (req, res) => {
 
     } catch (error) {
         console.error('Unexpected Error:', error);
+        console.error('Error stack:', error.stack);
         res.status(500).json({ 
             error: true,
             message: 'An unexpected error occurred: ' + error.message 
