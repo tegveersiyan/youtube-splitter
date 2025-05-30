@@ -198,8 +198,9 @@
 
         async function splitVideo() {
             const youtubeUrl = document.getElementById('youtubeUrl').value;
-            const timestampsInput = document.getElementById('timestamps').value;
-            const timestamps = timestampsInput.split('\n').map(t => t.trim()).filter(t => t);
+            const timestamps = Array.from(document.getElementsByClassName('timestamp'))
+                .map(input => input.value.trim())
+                .filter(value => value !== '');
             
             if (!youtubeUrl || timestamps.length === 0) {
                 showError('Please enter a YouTube URL and at least one timestamp');
@@ -237,29 +238,8 @@
                 }
 
                 if (data.segments && data.segments.length > 0) {
-                    const segmentsList = document.getElementById('segmentsList');
-                    segmentsList.innerHTML = '';
-                    
-                    data.segments.forEach((segment, index) => {
-                        const li = document.createElement('li');
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = `/download/${encodeURIComponent(segment)}`;
-                        downloadLink.textContent = `Download Segment ${index + 1}`;
-                        downloadLink.className = 'download-link';
-                        li.appendChild(downloadLink);
-                        segmentsList.appendChild(li);
-                    });
-
-                    if (data.segments.length > 1) {
-                        const downloadAllLink = document.createElement('a');
-                        downloadAllLink.href = '/download-all';
-                        downloadAllLink.textContent = 'Download All Segments';
-                        downloadAllLink.className = 'download-all-link';
-                        segmentsList.appendChild(document.createElement('br'));
-                        segmentsList.appendChild(downloadAllLink);
-                    }
-
-                    document.getElementById('segments').style.display = 'block';
+                    displaySegments(data.segments);
+                    showSuccess('Video processed successfully!');
                 } else {
                     throw new Error('No segments were created');
                 }
