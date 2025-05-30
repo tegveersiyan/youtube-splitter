@@ -40,10 +40,13 @@ if (!fs.existsSync(downloadsDir)) {
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Server Error:', err);
-    res.status(500).json({ error: 'Server error: ' + err.message });
+    res.status(500).json({ 
+        error: true,
+        message: 'Server error: ' + err.message 
+    });
 });
 
-// Add this before other routes
+// Ensure JSON responses
 app.use((req, res, next) => {
     res.setHeader('Content-Type', 'application/json');
     next();
@@ -63,20 +66,43 @@ app.post('/split-video', async (req, res) => {
         const { youtubeUrl, timestamps: rawTimestamps } = req.body;
         
         if (!youtubeUrl || !rawTimestamps || !Array.isArray(rawTimestamps)) {
-            return res.status(400).json({ error: 'Invalid input' });
+            return res.status(400).json({ 
+                error: true,
+                message: 'Invalid input: URL and timestamps are required' 
+            });
         }
 
-        const videoId = ytdl.getVideoID(youtubeUrl);
-        
+        let videoId;
+        try {
+            videoId = ytdl.getVideoID(youtubeUrl);
+        } catch (error) {
+            return res.status(400).json({ 
+                error: true,
+                message: 'Invalid YouTube URL' 
+            });
+        }
+
         // Get video info using YouTube API
-        const videoInfo = await youtube.videos.list({
-            key: API_KEY,
-            part: 'snippet',
-            id: videoId
-        });
+        let videoInfo;
+        try {
+            videoInfo = await youtube.videos.list({
+                key: API_KEY,
+                part: 'snippet',
+                id: videoId
+            });
+        } catch (error) {
+            console.error('YouTube API Error:', error);
+            return res.status(500).json({ 
+                error: true,
+                message: 'Failed to fetch video information from YouTube' 
+            });
+        }
 
         if (!videoInfo.data.items || videoInfo.data.items.length === 0) {
-            return res.status(400).json({ error: 'Video not found' });
+            return res.status(404).json({ 
+                error: true,
+                message: 'Video not found' 
+            });
         }
 
         const videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -92,7 +118,10 @@ app.post('/split-video', async (req, res) => {
         }).filter(ts => !isNaN(ts)).sort((a, b) => a - b);
 
         if (parsedTimestamps.length === 0) {
-            return res.status(400).json({ error: 'No valid timestamps provided' });
+            return res.status(400).json({ 
+                error: true,
+                message: 'No valid timestamps provided' 
+            });
         }
 
         if (parsedTimestamps[0] !== 0) {
@@ -100,15 +129,23 @@ app.post('/split-video', async (req, res) => {
         }
 
         // Download video using ytdl-core
-        await new Promise((resolve, reject) => {
-            ytdl(youtubeUrl, {
-                quality: 'highestaudio',
-                filter: 'audioonly'
-            })
-            .pipe(fs.createWriteStream(videoPath))
-            .on('finish', resolve)
-            .on('error', reject);
-        });
+        try {
+            await new Promise((resolve, reject) => {
+                ytdl(youtubeUrl, {
+                    quality: 'highestaudio',
+                    filter: 'audioonly'
+                })
+                .pipe(fs.createWriteStream(videoPath))
+                .on('finish', resolve)
+                .on('error', reject);
+            });
+        } catch (error) {
+            console.error('Download Error:', error);
+            return res.status(500).json({ 
+                error: true,
+                message: 'Failed to download video: ' + error.message 
+            });
+        }
 
         const segments = [];
         for (let i = 0; i < parsedTimestamps.length; i++) {
@@ -116,36 +153,58 @@ app.post('/split-video', async (req, res) => {
             const endTime = parsedTimestamps[i + 1];
             const segmentPath = path.join(downloadsDir, `${videoTitle}_segment_${i + 1}.mp3`);
 
-            await new Promise((resolve, reject) => {
-                const command = ffmpeg(videoPath).setStartTime(startTime);
-                if (endTime !== undefined) {
-                    command.setDuration(endTime - startTime);
-                }
-                command
-                    .toFormat('mp3')
-                    .on('end', resolve)
-                    .on('error', reject)
-                    .save(segmentPath);
-            });
+            try {
+                await new Promise((resolve, reject) => {
+                    const command = ffmpeg(videoPath).setStartTime(startTime);
+                    if (endTime !== undefined) {
+                        command.setDuration(endTime - startTime);
+                    }
+                    command
+                        .toFormat('mp3')
+                        .on('end', resolve)
+                        .on('error', reject)
+                        .save(segmentPath);
+                });
 
-            segments.push({
-                path: segmentPath,
-                name: `${videoTitle}_segment_${i + 1}.mp3`
-            });
+                segments.push({
+                    path: segmentPath,
+                    name: `${videoTitle}_segment_${i + 1}.mp3`
+                });
+            } catch (error) {
+                console.error('FFmpeg Error:', error);
+                // Clean up any created files
+                segments.forEach(segment => {
+                    if (fs.existsSync(segment.path)) {
+                        fs.unlinkSync(segment.path);
+                    }
+                });
+                if (fs.existsSync(videoPath)) {
+                    fs.unlinkSync(videoPath);
+                }
+                return res.status(500).json({ 
+                    error: true,
+                    message: 'Failed to process video segments: ' + error.message 
+                });
+            }
         }
 
-        fs.unlinkSync(videoPath);
-        res.json({ success: true, segments: segments.map(s => s.name) });
+        // Clean up the original video file
+        if (fs.existsSync(videoPath)) {
+            fs.unlinkSync(videoPath);
+        }
+
+        res.json({ 
+            error: false,
+            success: true, 
+            segments: segments.map(s => s.name) 
+        });
 
     } catch (error) {
-        console.error('Error:', error);
-        if (error.message.includes('Status code: 410')) {
-            return res.status(400).json({ error: 'This video is no longer available on YouTube' });
-        }
-        if (error.message.includes('Status code: 403')) {
-            return res.status(400).json({ error: 'This video is not available for download. Please try a different video.' });
-        }
-        res.status(500).json({ error: 'Failed to process video: ' + error.message });
+        console.error('Unexpected Error:', error);
+        res.status(500).json({ 
+            error: true,
+            message: 'An unexpected error occurred: ' + error.message 
+        });
     }
 });
 
@@ -158,16 +217,25 @@ app.get('/download/:filename', (req, res) => {
             res.download(filePath, filename, (err) => {
                 if (err) {
                     console.error('Download error:', err);
-                    res.status(500).json({ error: 'Error downloading file: ' + err.message });
+                    res.status(500).json({ 
+                        error: true,
+                        message: 'Error downloading file: ' + err.message 
+                    });
                 }
                 fs.unlinkSync(filePath);
             });
         } else {
-            res.status(404).json({ error: 'File not found' });
+            res.status(404).json({ 
+                error: true,
+                message: 'File not found' 
+            });
         }
     } catch (error) {
         console.error('Download error:', error);
-        res.status(500).json({ error: 'Error downloading file: ' + error.message });
+        res.status(500).json({ 
+            error: true,
+            message: 'Error downloading file: ' + error.message 
+        });
     }
 });
 
@@ -175,7 +243,10 @@ app.get('/download-zip', async (req, res) => {
     try {
         const files = req.query.files;
         if (!files) {
-            return res.status(400).json({ error: 'No files specified' });
+            return res.status(400).json({ 
+                error: true,
+                message: 'No files specified' 
+            });
         }
         const fileList = files.split(',').map(f => f.trim());
         res.setHeader('Content-Type', 'application/zip');
@@ -191,7 +262,10 @@ app.get('/download-zip', async (req, res) => {
         archive.finalize();
     } catch (error) {
         console.error('Zip error:', error);
-        res.status(500).json({ error: 'Error creating zip file: ' + error.message });
+        res.status(500).json({ 
+            error: true,
+            message: 'Error creating zip file: ' + error.message 
+        });
     }
 });
 
