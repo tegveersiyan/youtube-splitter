@@ -30,12 +30,15 @@ async function ensureYtDlp() {
     } catch (error) {
         console.log('Installing yt-dlp...');
         try {
-            // For Render (Linux environment)
-            execSync('curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /tmp/yt-dlp && chmod a+rx /tmp/yt-dlp && sudo mv /tmp/yt-dlp /usr/local/bin/yt-dlp', { stdio: 'inherit' });
+            // Install yt-dlp in the project directory without sudo
+            const ytDlpPath = path.join(__dirname, 'yt-dlp');
+            execSync(`curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "${ytDlpPath}" && chmod a+rx "${ytDlpPath}"`, { stdio: 'inherit' });
+            // Set the path to include the current directory
+            process.env.PATH = `${__dirname}:${process.env.PATH}`;
             console.log('yt-dlp installed successfully');
         } catch (installError) {
             console.error('Failed to install yt-dlp:', installError);
-            throw new Error('Failed to install yt-dlp. Please ensure the application has sudo privileges on Render.');
+            throw new Error('Failed to install yt-dlp. Please check the Render logs for more details.');
         }
     }
 }

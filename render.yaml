@@ -2,9 +2,13 @@ services:
   - type: web
     name: youtube-splitter
     env: node
+    plan: standard
+    region: oregon
     buildCommand: |
       apt-get update && apt-get install -y ffmpeg
       npm install
+      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp
+      chmod a+rx yt-dlp
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -16,4 +20,8 @@ services:
     disk:
       name: downloads
       mountPath: /opt/render/project/src/downloads
-      sizeGB: 1 
+      sizeGB: 1
+    resources:
+      memory: 1GB
+      cpu: 1
+    autoDeploy: true 
