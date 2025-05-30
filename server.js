@@ -6,6 +6,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
+const { execSync } = require('child_process');
 
 // Set FFmpeg paths
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
@@ -19,6 +20,41 @@ ffmpeg.setFfprobePath(ffprobePath);
 if (!fs.existsSync(cookiesPath)) {
     console.warn('Warning: YouTube cookies file not found. Some videos may require authentication.');
 }
+
+// Function to install yt-dlp
+async function ensureYtDlp() {
+    try {
+        const ytDlp = new YTDlpWrap();
+        await ytDlp.getVersion();
+        console.log('yt-dlp is installed');
+    } catch (error) {
+        console.log('Installing yt-dlp...');
+        try {
+            if (process.platform === 'win32') {
+                // For Windows
+                execSync('npm install -g yt-dlp-wrap', { stdio: 'inherit' });
+            } else {
+                // For Linux/Mac
+                execSync('sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp', { stdio: 'inherit' });
+            }
+            console.log('yt-dlp installed successfully');
+        } catch (installError) {
+            console.error('Failed to install yt-dlp:', installError);
+            throw new Error('Failed to install yt-dlp. Please install it manually: https://github.com/yt-dlp/yt-dlp#installation');
+        }
+    }
+}
+
+// Initialize yt-dlp
+let ytDlp;
+(async () => {
+    try {
+        await ensureYtDlp();
+        ytDlp = new YTDlpWrap();
+    } catch (error) {
+        console.error('Failed to initialize yt-dlp:', error);
+    }
+})();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -55,10 +91,13 @@ ffmpeg.getAvailableFormats(function(err, formats) {
     }
 });
 
-const ytDlp = new YTDlpWrap();
-
 app.post('/split-video', async (req, res) => {
     try {
+        if (!ytDlp) {
+            await ensureYtDlp();
+            ytDlp = new YTDlpWrap();
+        }
+
         const { youtubeUrl, timestamps: rawTimestamps } = req.body;
         
         if (!youtubeUrl || !rawTimestamps || !Array.isArray(rawTimestamps)) {
