@@ -175,9 +175,15 @@ app.post('/split-video', async (req, res) => {
                     filter: 'audioonly',
                     requestOptions: {
                         headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.5',
+                            'Connection': 'keep-alive',
+                            'Upgrade-Insecure-Requests': '1'
                         }
-                    }
+                    },
+                    lang: 'en',
+                    range: { start: 0, end: 0 }
                 });
 
                 stream.on('error', (error) => {
@@ -200,18 +206,26 @@ app.post('/split-video', async (req, res) => {
                         title: info.videoDetails.title,
                         author: info.videoDetails.author.name,
                         length: info.videoDetails.lengthSeconds,
-                        format: format.qualityLabel
+                        format: format.qualityLabel,
+                        formats: info.formats.map(f => ({
+                            quality: f.qualityLabel,
+                            mimeType: f.mimeType,
+                            hasAudio: f.hasAudio,
+                            hasVideo: f.hasVideo
+                        }))
                     });
                 });
 
-                stream.pipe(fs.createWriteStream(videoPath))
+                const writeStream = fs.createWriteStream(videoPath);
+                writeStream.on('error', (error) => {
+                    console.error('File write error:', error);
+                    reject(error);
+                });
+
+                stream.pipe(writeStream)
                     .on('finish', () => {
                         console.log('Video download completed');
                         resolve();
-                    })
-                    .on('error', (error) => {
-                        console.error('File write error:', error);
-                        reject(error);
                     });
             });
         } catch (error) {
@@ -241,7 +255,8 @@ app.post('/split-video', async (req, res) => {
             
             return res.status(500).json({ 
                 error: true,
-                message: errorMessage
+                message: errorMessage,
+                statusCode: error.statusCode || 500
             });
         }
 
