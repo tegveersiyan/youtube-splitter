@@ -161,12 +161,58 @@ app.post('/split-video', async (req, res) => {
                 addHeader: [
                     'referer:youtube.com',
                     'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                ]
+                ],
+                // Add these options for better reliability
+                format: 'bestaudio/best',
+                postprocessorArgs: [
+                    '-codec:a', 'libmp3lame',
+                    '-qscale:a', '2'
+                ],
+                // Force download even if video is restricted
+                forceGenericExtractor: true,
+                // Add more headers to bypass restrictions
+                addHeaders: {
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                }
             };
 
             console.log('Downloading with options:', options);
+            
+            // First, get video info to verify it's accessible
+            const videoInfo = await youtubeDl(youtubeUrl, {
+                dumpSingleJson: true,
+                noWarnings: true,
+                noCallHome: true,
+                noCheckCertificate: true,
+                preferFreeFormats: true,
+                youtubeSkipDashManifest: true,
+                addHeader: options.addHeader
+            });
+            
+            console.log('Video info retrieved successfully:', {
+                title: videoInfo.title,
+                duration: videoInfo.duration,
+                formats: videoInfo.formats?.length || 0
+            });
+
+            // Now download the video
             await youtubeDl(youtubeUrl, options);
-            console.log('Video download completed');
+            
+            // Verify the file was downloaded
+            if (!fs.existsSync(videoPath)) {
+                throw new Error('Download completed but file not found at: ' + videoPath);
+            }
+            
+            const stats = fs.statSync(videoPath);
+            if (stats.size === 0) {
+                throw new Error('Downloaded file is empty');
+            }
+            
+            console.log('Video download completed successfully. File size:', stats.size);
 
         } catch (error) {
             console.error('Download Error:', error);
