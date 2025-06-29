@@ -2,8 +2,8 @@ const http = require('http');
 
 function testVideoSplit() {
     const testData = {
-        youtubeUrl: 'https://www.youtube.com/watch?v=m1a_GqJf02M',
-        timestamps: ['90', '100']
+        youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        timestamps: ['30']
     };
 
     console.log('Testing video split with:', testData);

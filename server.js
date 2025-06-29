@@ -1,12 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
-const { google } = require('googleapis');
 const axios = require('axios');
 const os = require('os');
 
@@ -27,15 +25,6 @@ if (isWindows) {
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
-
-// YouTube API setup
-const youtube = google.youtube('v3');
-const API_KEY = process.env.YOUTUBE_API_KEY;
-
-// Note: YouTube API key is optional when using ytdl-core
-if (!API_KEY) {
-    console.warn('Warning: YouTube API key not set. Video titles will be extracted from ytdl-core instead.');
-}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -108,65 +97,52 @@ app.post('/split-video', async (req, res) => {
             });
         }
 
-        // Get video info using YouTube API or third-party API
+        // Get video info using youtube-mp3-download1 RapidAPI
         let videoInfo;
         let videoTitle;
         
-        if (API_KEY) {
-            try {
-                console.log('Fetching video info from YouTube API...');
-                const videoId = youtubeUrl.split('v=')[1];
-                videoInfo = await youtube.videos.list({
-                    key: API_KEY,
-                    part: 'snippet',
-                    id: videoId
-                });
-                console.log('Video info received:', videoInfo.data.items ? 'Video found' : 'Video not found');
-                if (videoInfo.data.items && videoInfo.data.items.length > 0) {
-                    videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                    console.log('Video title from API:', videoInfo.data.items[0].snippet.title);
-                }
-            } catch (error) {
-                console.error('YouTube API Error:', error);
-                console.log('Falling back to third-party API for video info...');
+        try {
+            console.log('Fetching video info from youtube-mp3-download1 RapidAPI...');
+            // Extract video ID from URL
+            const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+            if (!videoId) {
+                throw new Error('Invalid YouTube URL');
             }
-        }
-        
-        // If API failed or not available, use third-party API
-        if (!videoTitle) {
-            try {
-                console.log('Fetching video info from third-party API...');
-                // Extract video ID from URL
-                const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
-                if (!videoId) {
-                    throw new Error('Invalid YouTube URL');
+            
+            // Call youtube-mp3-download1 API for MP3 link
+            const options = {
+                method: 'GET',
+                url: 'https://youtube-mp3-download1.p.rapidapi.com/dl',
+                params: { id: videoId },
+                headers: {
+                    'X-RapidAPI-Key': process.env.RAPIDAPI_KEY || 'a4da6936ffmshf4958e64506a344p1e8481jsna7cb80f8f9fa',
+                    'X-RapidAPI-Host': 'youtube-mp3-download1.p.rapidapi.com'
                 }
-                
-                // Use a more reliable third-party API for video info
-                // This API provides video metadata without requiring authentication
-                const infoResponse = await axios.get(`https://api.vevioz.com/@api/json/mp3/${videoId}`);
-                
-                if (infoResponse.data && infoResponse.data.title) {
-                    videoTitle = infoResponse.data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                    console.log('Video title from third-party API:', infoResponse.data.title);
-                } else {
-                    // Fallback: use video ID as title
-                    videoTitle = `youtube_video_${videoId}`;
-                    console.log('Using video ID as title:', videoTitle);
-                }
-            } catch (error) {
-                console.error('Third-party API Error:', error);
+            };
+
+            console.log('Calling youtube-mp3-download1 RapidAPI...');
+            const response = await axios.request(options);
+            
+            if (response.data && response.data.status === 'ok' && response.data.title) {
+                videoTitle = response.data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                console.log('Video title from youtube-mp3-download1 RapidAPI:', response.data.title);
+            } else {
                 // Fallback: use video ID as title
-                const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
-                if (videoId) {
-                    videoTitle = `youtube_video_${videoId}`;
-                    console.log('Using video ID as fallback title:', videoTitle);
-                } else {
-                    return res.status(500).json({ 
-                        error: true,
-                        message: 'Failed to fetch video information: ' + error.message 
-                    });
-                }
+                videoTitle = `youtube_video_${videoId}`;
+                console.log('Using video ID as title:', videoTitle);
+            }
+        } catch (error) {
+            console.error('youtube-mp3-download1 RapidAPI Error:', error);
+            // Fallback: use video ID as title
+            const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+            if (videoId) {
+                videoTitle = `youtube_video_${videoId}`;
+                console.log('Using video ID as fallback title:', videoTitle);
+            } else {
+                return res.status(500).json({ 
+                    error: true,
+                    message: 'Failed to fetch video information: ' + error.message 
+                });
             }
         }
 
@@ -205,7 +181,7 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        // Download video using RapidAPI
+        // Download video using youtube-mp3-download1 RapidAPI
         try {
             console.log('Starting video download...');
             console.log('Video URL:', youtubeUrl);
@@ -216,38 +192,40 @@ app.post('/split-video', async (req, res) => {
                 throw new Error('Invalid YouTube URL');
             }
 
-            console.log('Video ID:', videoId);
-
-            // Call RapidAPI for MP3 link
+            // Call youtube-mp3-download1 API for MP3 link
             const options = {
                 method: 'GET',
-                url: 'https://youtube-mp36.p.rapidapi.com/dl',
+                url: 'https://youtube-mp3-download1.p.rapidapi.com/dl',
                 params: { id: videoId },
                 headers: {
                     'X-RapidAPI-Key': process.env.RAPIDAPI_KEY || 'a4da6936ffmshf4958e64506a344p1e8481jsna7cb80f8f9fa',
-                    'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
+                    'X-RapidAPI-Host': 'youtube-mp3-download1.p.rapidapi.com'
                 }
             };
 
-            console.log('Calling RapidAPI...');
-            const response = await axios.request(options);
+            console.log('Calling youtube-mp3-download1 RapidAPI...');
+            const downloadResponse = await axios.request(options);
 
-            console.log('RapidAPI response:', response.data);
+            console.log('RapidAPI response:', downloadResponse.data);
 
-            if (!response.data || response.data.status !== 'ok' || !response.data.link) {
-                throw new Error('No download URL available from RapidAPI: ' + (response.data?.msg || 'Unknown error'));
+            if (!downloadResponse.data || !downloadResponse.data.link) {
+                throw new Error('No download URL available from RapidAPI: ' + (downloadResponse.data?.msg || 'Unknown error'));
             }
 
-            const mp3Url = response.data.link;
+            const mp3Url = downloadResponse.data.link;
+            const videoTitle = downloadResponse.data.title
+                ? downloadResponse.data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+                : `youtube_video_${videoId}`;
+            const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
             console.log('MP3 URL received:', mp3Url);
 
             const writeStream = fs.createWriteStream(videoPath);
-            const mp3Response = await axios({ 
-                method: 'GET', 
-                url: mp3Url, 
-                responseType: 'stream' 
+            const mp3Response = await axios({
+                method: 'GET',
+                url: mp3Url,
+                responseType: 'stream'
             });
-            
+
             mp3Response.data.pipe(writeStream);
 
             await new Promise((resolve, reject) => {
@@ -269,13 +247,82 @@ app.post('/split-video', async (req, res) => {
             if (!fs.existsSync(videoPath)) {
                 throw new Error('Download completed but file not found at: ' + videoPath);
             }
-            
             const stats = fs.statSync(videoPath);
             if (stats.size === 0) {
                 throw new Error('Downloaded file is empty');
             }
-            
             console.log('Video download completed successfully. File size:', stats.size);
+
+            const segments = [];
+            for (let i = 0; i < parsedTimestamps.length; i++) {
+                const startTime = parsedTimestamps[i];
+                const endTime = parsedTimestamps[i + 1];
+                const segmentPath = path.join(downloadsDir, `${videoTitle}_segment_${i + 1}.mp3`);
+                console.log(`Processing segment ${i + 1}: ${startTime} - ${endTime || 'end'}`);
+
+                try {
+                    await new Promise((resolve, reject) => {
+                        const command = ffmpeg(videoPath)
+                            .setStartTime(startTime)
+                            .on('start', (commandLine) => {
+                                console.log('FFmpeg command:', commandLine);
+                            })
+                            .on('progress', (progress) => {
+                                console.log(`Segment ${i + 1} progress:`, progress);
+                            });
+
+                        if (endTime !== undefined) {
+                            command.setDuration(endTime - startTime);
+                        }
+
+                        command
+                            .toFormat('mp3')
+                            .on('end', () => {
+                                console.log(`Segment ${i + 1} processing completed`);
+                                resolve();
+                            })
+                            .on('error', (error) => {
+                                console.error(`Segment ${i + 1} processing error:`, error);
+                                reject(error);
+                            })
+                            .save(segmentPath);
+                    });
+
+                    segments.push({
+                        path: segmentPath,
+                        name: `${videoTitle}_segment_${i + 1}.mp3`
+                    });
+                } catch (error) {
+                    console.error('FFmpeg Error:', error);
+                    // Clean up any created files
+                    segments.forEach(segment => {
+                        if (fs.existsSync(segment.path)) {
+                            fs.unlinkSync(segment.path);
+                        }
+                    });
+                    if (fs.existsSync(videoPath)) {
+                        fs.unlinkSync(videoPath);
+                    }
+                    return res.status(500).json({ 
+                        error: true,
+                        message: 'Failed to process video segments: ' + error.message 
+                    });
+                }
+            }
+
+            // Clean up the original video file
+            if (fs.existsSync(videoPath)) {
+                fs.unlinkSync(videoPath);
+            }
+
+            console.log('All segments processed successfully');
+            const response = { 
+                error: false,
+                success: true, 
+                segments: segments.map(s => s.name) 
+            };
+            console.log('Sending response:', response);
+            res.json(response);
 
         } catch (error) {
             console.error('Download Error:', error);
@@ -285,88 +332,18 @@ app.post('/split-video', async (req, res) => {
                 statusCode: error.statusCode,
                 stack: error.stack
             });
-            
             // Clean up any partial download
+            const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+            const videoTitle = `youtube_video_${videoId}`;
+            const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
             if (fs.existsSync(videoPath)) {
                 fs.unlinkSync(videoPath);
             }
-            
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: true,
                 message: 'Failed to download video: ' + error.message
             });
         }
-
-        const segments = [];
-        for (let i = 0; i < parsedTimestamps.length; i++) {
-            const startTime = parsedTimestamps[i];
-            const endTime = parsedTimestamps[i + 1];
-            const segmentPath = path.join(downloadsDir, `${videoTitle}_segment_${i + 1}.mp3`);
-            console.log(`Processing segment ${i + 1}: ${startTime} - ${endTime || 'end'}`);
-
-            try {
-                await new Promise((resolve, reject) => {
-                    const command = ffmpeg(videoPath)
-                        .setStartTime(startTime)
-                        .on('start', (commandLine) => {
-                            console.log('FFmpeg command:', commandLine);
-                        })
-                        .on('progress', (progress) => {
-                            console.log(`Segment ${i + 1} progress:`, progress);
-                        });
-
-                    if (endTime !== undefined) {
-                        command.setDuration(endTime - startTime);
-                    }
-
-                    command
-                        .toFormat('mp3')
-                        .on('end', () => {
-                            console.log(`Segment ${i + 1} processing completed`);
-                            resolve();
-                        })
-                        .on('error', (error) => {
-                            console.error(`Segment ${i + 1} processing error:`, error);
-                            reject(error);
-                        })
-                        .save(segmentPath);
-                });
-
-                segments.push({
-                    path: segmentPath,
-                    name: `${videoTitle}_segment_${i + 1}.mp3`
-                });
-            } catch (error) {
-                console.error('FFmpeg Error:', error);
-                // Clean up any created files
-                segments.forEach(segment => {
-                    if (fs.existsSync(segment.path)) {
-                        fs.unlinkSync(segment.path);
-                    }
-                });
-                if (fs.existsSync(videoPath)) {
-                    fs.unlinkSync(videoPath);
-                }
-                return res.status(500).json({ 
-                    error: true,
-                    message: 'Failed to process video segments: ' + error.message 
-                });
-            }
-        }
-
-        // Clean up the original video file
-        if (fs.existsSync(videoPath)) {
-            fs.unlinkSync(videoPath);
-        }
-
-        console.log('All segments processed successfully');
-        const response = { 
-            error: false,
-            success: true, 
-            segments: segments.map(s => s.name) 
-        };
-        console.log('Sending response:', response);
-        res.json(response);
 
     } catch (error) {
         console.error('Unexpected Error:', error);
