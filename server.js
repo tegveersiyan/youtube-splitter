@@ -1,16 +1,28 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const youtubeDl = require('youtube-dl-exec');
+const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const { google } = require('googleapis');
+const os = require('os');
 
-// Set FFmpeg paths for Render
-const ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
-const ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
+// Set FFmpeg paths for different operating systems
+const isWindows = os.platform() === 'win32';
+
+let ffmpegPath, ffprobePath;
+
+if (isWindows) {
+    // Windows paths - try to find FFmpeg in PATH or common locations
+    ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+} else {
+    // Linux/Mac paths (for Render deployment)
+    ffmpegPath = process.env.FFMPEG_PATH || '/usr/bin/ffmpeg';
+    ffprobePath = process.env.FFPROBE_PATH || '/usr/bin/ffprobe';
+}
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -19,9 +31,9 @@ ffmpeg.setFfprobePath(ffprobePath);
 const youtube = google.youtube('v3');
 const API_KEY = process.env.YOUTUBE_API_KEY;
 
+// Note: YouTube API key is optional when using ytdl-core
 if (!API_KEY) {
-    console.error('Error: YouTube API key not set. Please set the YOUTUBE_API_KEY environment variable.');
-    process.exit(1);
+    console.warn('Warning: YouTube API key not set. Video titles will be extracted from ytdl-core instead.');
 }
 
 const app = express();
@@ -65,9 +77,17 @@ app.use((req, res, next) => {
 // Test FFmpeg installation
 ffmpeg.getAvailableFormats(function(err, formats) {
     if (err) {
-        console.error('FFmpeg Error:', err);
-        console.error('Please ensure FFmpeg is installed and accessible at:', ffmpegPath);
-        process.exit(1);
+        console.error('FFmpeg Error:', err.message);
+        console.error('FFmpeg is required for video processing but not found.');
+        console.error('');
+        console.error('To install FFmpeg:');
+        console.error('Windows: Download from https://ffmpeg.org/download.html and add to PATH');
+        console.error('macOS: brew install ffmpeg');
+        console.error('Linux: sudo apt-get install ffmpeg');
+        console.error('');
+        console.error('The server will start but video processing will fail without FFmpeg.');
+        console.error('Current FFmpeg path:', ffmpegPath);
+        console.error('Current FFprobe path:', ffprobePath);
     } else {
         console.log('FFmpeg is properly installed and accessible');
     }
@@ -87,37 +107,76 @@ app.post('/split-video', async (req, res) => {
             });
         }
 
-        // Get video info using YouTube API
+        // Get video info using YouTube API or third-party API
         let videoInfo;
-        try {
-            console.log('Fetching video info from YouTube API...');
-            const videoId = youtubeUrl.split('v=')[1];
-            videoInfo = await youtube.videos.list({
-                key: API_KEY,
-                part: 'snippet',
-                id: videoId
-            });
-            console.log('Video info received:', videoInfo.data.items ? 'Video found' : 'Video not found');
-            if (videoInfo.data.items) {
-                console.log('Video title:', videoInfo.data.items[0].snippet.title);
+        let videoTitle;
+        
+        if (API_KEY) {
+            try {
+                console.log('Fetching video info from YouTube API...');
+                const videoId = youtubeUrl.split('v=')[1];
+                videoInfo = await youtube.videos.list({
+                    key: API_KEY,
+                    part: 'snippet',
+                    id: videoId
+                });
+                console.log('Video info received:', videoInfo.data.items ? 'Video found' : 'Video not found');
+                if (videoInfo.data.items && videoInfo.data.items.length > 0) {
+                    videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                    console.log('Video title from API:', videoInfo.data.items[0].snippet.title);
+                }
+            } catch (error) {
+                console.error('YouTube API Error:', error);
+                console.log('Falling back to third-party API for video info...');
             }
-        } catch (error) {
-            console.error('YouTube API Error:', error);
-            return res.status(500).json({ 
-                error: true,
-                message: 'Failed to fetch video information from YouTube: ' + error.message 
-            });
+        }
+        
+        // If API failed or not available, use third-party API
+        if (!videoTitle) {
+            try {
+                console.log('Fetching video info from third-party API...');
+                // Extract video ID from URL
+                const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+                if (!videoId) {
+                    throw new Error('Invalid YouTube URL');
+                }
+                
+                // Use a more reliable third-party API for video info
+                // This API provides video metadata without requiring authentication
+                const infoResponse = await axios.get(`https://api.vevioz.com/@api/json/mp3/${videoId}`);
+                
+                if (infoResponse.data && infoResponse.data.title) {
+                    videoTitle = infoResponse.data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                    console.log('Video title from third-party API:', infoResponse.data.title);
+                } else {
+                    // Fallback: use video ID as title
+                    videoTitle = `youtube_video_${videoId}`;
+                    console.log('Using video ID as title:', videoTitle);
+                }
+            } catch (error) {
+                console.error('Third-party API Error:', error);
+                // Fallback: use video ID as title
+                const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+                if (videoId) {
+                    videoTitle = `youtube_video_${videoId}`;
+                    console.log('Using video ID as fallback title:', videoTitle);
+                } else {
+                    return res.status(500).json({ 
+                        error: true,
+                        message: 'Failed to fetch video information: ' + error.message 
+                    });
+                }
+            }
         }
 
-        if (!videoInfo.data.items || videoInfo.data.items.length === 0) {
-            console.log('Video not found in YouTube API response');
+        if (!videoTitle) {
+            console.log('Could not get video title');
             return res.status(404).json({ 
                 error: true,
                 message: 'Video not found or is not accessible' 
             });
         }
 
-        const videoTitle = videoInfo.data.items[0].snippet.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const videoPath = path.join(downloadsDir, `${videoTitle}.mp3`);
         console.log('Processing video:', videoTitle);
         console.log('Video path:', videoPath);
@@ -145,62 +204,58 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        // Download video using youtube-dl
+        // Download video using third-party API
         try {
             console.log('Starting video download...');
             console.log('Video URL:', youtubeUrl);
             
-            const options = {
-                extractAudio: true,
-                audioFormat: 'mp3',
-                audioQuality: 0,
-                output: videoPath,
-                noCheckCertificates: true,
-                noWarnings: true,
-                preferFreeFormats: true,
-                addHeader: [
-                    'referer:youtube.com',
-                    'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                ],
-                // Add these options for better reliability
-                format: 'bestaudio/best',
-                postprocessorArgs: [
-                    '-codec:a', 'libmp3lame',
-                    '-qscale:a', '2'
-                ],
-                // Force download even if video is restricted
-                forceGenericExtractor: true,
-                // Add more headers to bypass restrictions
-                addHeaders: {
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1'
-                }
-            };
-
-            console.log('Downloading with options:', options);
+            // Extract video ID
+            const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
+            if (!videoId) {
+                throw new Error('Invalid YouTube URL');
+            }
             
-            // First, get video info to verify it's accessible
-            const videoInfo = await youtubeDl(youtubeUrl, {
-                dumpSingleJson: true,
-                noWarnings: true,
-                noCallHome: true,
-                noCheckCertificate: true,
-                preferFreeFormats: true,
-                youtubeSkipDashManifest: true,
-                addHeader: options.addHeader
-            });
+            console.log('Video ID:', videoId);
             
-            console.log('Video info retrieved successfully:', {
-                title: videoInfo.title,
-                duration: videoInfo.duration,
-                formats: videoInfo.formats?.length || 0
-            });
-
-            // Now download the video
-            await youtubeDl(youtubeUrl, options);
+            // Use a more reliable third-party API for downloading
+            // This API directly provides MP3 download links
+            const downloadUrl = `https://api.vevioz.com/@api/json/mp3/${videoId}`;
+            
+            console.log('Fetching download info from:', downloadUrl);
+            
+            // Get download information
+            const downloadInfo = await axios.get(downloadUrl);
+            
+            if (downloadInfo.data && downloadInfo.data.url) {
+                console.log('Download URL found:', downloadInfo.data.url);
+                
+                // Download the MP3 file
+                console.log('Downloading MP3 file...');
+                const mp3Response = await axios({
+                    method: 'GET',
+                    url: downloadInfo.data.url,
+                    responseType: 'stream',
+                    timeout: 300000 // 5 minute timeout
+                });
+                
+                const writeStream = fs.createWriteStream(videoPath);
+                mp3Response.data.pipe(writeStream);
+                
+                await new Promise((resolve, reject) => {
+                    writeStream.on('finish', () => {
+                        console.log('Video download completed successfully');
+                        resolve();
+                    });
+                    
+                    writeStream.on('error', (error) => {
+                        console.error('Write stream error:', error);
+                        reject(error);
+                    });
+                });
+                
+            } else {
+                throw new Error('No download URL available from API');
+            }
             
             // Verify the file was downloaded
             if (!fs.existsSync(videoPath)) {
