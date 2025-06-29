@@ -1,12 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const axios = require('axios');
+const ytdl = require('ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
 const { google } = require('googleapis');
+const axios = require('axios');
 const os = require('os');
 
 // Set FFmpeg paths for different operating systems
@@ -204,59 +205,66 @@ app.post('/split-video', async (req, res) => {
             parsedTimestamps.unshift(0);
         }
 
-        // Download video using third-party API
+        // Download video using RapidAPI
         try {
             console.log('Starting video download...');
             console.log('Video URL:', youtubeUrl);
-            
+
             // Extract video ID
             const videoId = youtubeUrl.split('v=')[1]?.split('&')[0];
             if (!videoId) {
                 throw new Error('Invalid YouTube URL');
             }
-            
+
             console.log('Video ID:', videoId);
-            
-            // Use a more reliable third-party API for downloading
-            // This API directly provides MP3 download links
-            const downloadUrl = `https://api.vevioz.com/@api/json/mp3/${videoId}`;
-            
-            console.log('Fetching download info from:', downloadUrl);
-            
-            // Get download information
-            const downloadInfo = await axios.get(downloadUrl);
-            
-            if (downloadInfo.data && downloadInfo.data.url) {
-                console.log('Download URL found:', downloadInfo.data.url);
-                
-                // Download the MP3 file
-                console.log('Downloading MP3 file...');
-                const mp3Response = await axios({
-                    method: 'GET',
-                    url: downloadInfo.data.url,
-                    responseType: 'stream',
-                    timeout: 300000 // 5 minute timeout
-                });
-                
-                const writeStream = fs.createWriteStream(videoPath);
-                mp3Response.data.pipe(writeStream);
-                
-                await new Promise((resolve, reject) => {
-                    writeStream.on('finish', () => {
-                        console.log('Video download completed successfully');
-                        resolve();
-                    });
-                    
-                    writeStream.on('error', (error) => {
-                        console.error('Write stream error:', error);
-                        reject(error);
-                    });
-                });
-                
-            } else {
-                throw new Error('No download URL available from API');
+
+            // Call RapidAPI for MP3 link
+            const options = {
+                method: 'GET',
+                url: 'https://youtube-mp36.p.rapidapi.com/dl',
+                params: { id: videoId },
+                headers: {
+                    'X-RapidAPI-Key': process.env.RAPIDAPI_KEY || 'a4da6936ffmshf4958e64506a344p1e8481jsna7cb80f8f9fa',
+                    'X-RapidAPI-Host': 'youtube-mp36.p.rapidapi.com'
+                }
+            };
+
+            console.log('Calling RapidAPI...');
+            const response = await axios.request(options);
+
+            console.log('RapidAPI response:', response.data);
+
+            if (!response.data || response.data.status !== 'ok' || !response.data.link) {
+                throw new Error('No download URL available from RapidAPI: ' + (response.data?.msg || 'Unknown error'));
             }
+
+            const mp3Url = response.data.link;
+            console.log('MP3 URL received:', mp3Url);
+
+            const writeStream = fs.createWriteStream(videoPath);
+            const mp3Response = await axios({ 
+                method: 'GET', 
+                url: mp3Url, 
+                responseType: 'stream' 
+            });
             
+            mp3Response.data.pipe(writeStream);
+
+            await new Promise((resolve, reject) => {
+                writeStream.on('finish', () => {
+                    console.log('MP3 download completed');
+                    resolve();
+                });
+                writeStream.on('error', (error) => {
+                    console.error('Write stream error:', error);
+                    reject(error);
+                });
+                mp3Response.data.on('error', (error) => {
+                    console.error('Download stream error:', error);
+                    reject(error);
+                });
+            });
+
             // Verify the file was downloaded
             if (!fs.existsSync(videoPath)) {
                 throw new Error('Download completed but file not found at: ' + videoPath);
